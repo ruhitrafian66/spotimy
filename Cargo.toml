@@ -1,0 +1,39 @@
+[package]
+name = "spotimy"
+version = "0.1.0"
+edition = "2024"
+description = "A lightweight native Spotify client for macOS and Windows"
+
+[dependencies]
+# UI: native immediate-mode GUI, OpenGL renderer. No webview, no Chromium.
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "system_fonts"] }
+
+# OAuth with PKCE: the code challenge is SHA-256, base64url-encoded.
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+open = "5"
+
+# Local WebSocket link to the official Spotify Soloist player. No TLS is necessary.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "process", "net", "io-util", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+dirs = "6"
+log = "0.4"
+env_logger = { version = "0.11", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "abort"
+
+# Image decode is too slow without optimization.
+[profile.dev.package."*"]
+opt-level = 2
