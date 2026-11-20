@@ -6,7 +6,7 @@ description = "A lightweight native Spotify client for macOS and Windows"
 
 [dependencies]
 # UI: native immediate-mode GUI, OpenGL renderer. No webview, no Chromium.
-eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "system_fonts"] }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "system_fonts", "clipboard"] }
 
 # OAuth with PKCE: the code challenge is SHA-256, base64url-encoded.
 sha2 = "0.10"
