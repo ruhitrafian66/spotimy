@@ -30,12 +30,16 @@ Spotify closed those routes for third-party client IDs in 2026; Soloist is the s
    Copy the client ID.
 2. **Soloist.** Download it from the
    [Soloist downloads page](https://developer.spotify.com/documentation/soloist/reference/downloads-and-updates)
-   and extract it. Spotimy looks next to its own executable, in `~/Downloads`, `~/soloist`, and on
-   `PATH`; or give the path on the setup screen.
+   into your Downloads folder. That is all: Spotimy notices the archive (or the extracted folder)
+   and unpacks it into its own data folder at login. If you keep Soloist somewhere else, give the
+   path under "Soloist is in a different folder".
 3. **Soloist API key.** Create one at <https://developer.spotify.com/dashboard/soloist>. Paste it on
    the setup screen (Spotimy passes it to `soloist setup-api-key` over stdin and does not store it),
    or run `soloist setup-api-key` yourself.
-4. Start Spotimy, fill in the setup screen, and approve the login in the browser.
+4. Start Spotimy, fill in the setup screen, and approve the login in the browser. The setup
+   screen checks the client ID format and shows whether Soloist was found. If the browser reports
+   `INVALID_CLIENT: Invalid redirect URI`, add the redirect URI from step 1 to your Spotify app;
+   **Cancel** in Spotimy returns to the setup screen.
 5. **Pair the player** (see below). Spotimy shows the instructions until this is done.
 
 ### Pairing the player

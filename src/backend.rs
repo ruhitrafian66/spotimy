@@ -76,6 +76,8 @@ struct Core {
     int_tx: UnboundedSender<Internal>,
     sol_tx: UnboundedSender<SoloistMsg>,
 
+    /// The task that waits for the browser during a login.
+    login_task: Option<tokio::task::JoinHandle<()>>,
     soloist: Option<Soloist>,
     generation: u64,
     paired: bool,
@@ -104,6 +106,7 @@ impl Core {
             images: Arc::new(Semaphore::new(6)),
             int_tx,
             sol_tx,
+            login_task: None,
             soloist: None,
             generation: 0,
             paired: false,
@@ -191,11 +194,12 @@ impl Core {
         self.paired = false;
         self.active = false;
         *self.device_id.lock().await = None;
-        let Some(exe) = soloist::find_exe(&self.cfg.soloist_path) else {
-            self.out.send(Event::Player(PlayerStatus::Failed(
-                "Soloist was not found. Download it and set its path.".into(),
-            )));
-            return;
+        let exe = match soloist::ensure_exe(&self.cfg.soloist_path).await {
+            Ok(exe) => exe,
+            Err(e) => {
+                self.out.send(Event::Player(PlayerStatus::Failed(e)));
+                return;
+            }
         };
         self.out.send(Event::Player(PlayerStatus::Starting));
         self.generation += 1;
@@ -366,15 +370,17 @@ impl Core {
         self.cfg.soloist_path = setup.soloist_path.trim().to_owned();
         self.cfg.save();
 
+        // Find Soloist now. This extracts a downloaded archive, if there is one.
+        let exe = soloist::ensure_exe(&self.cfg.soloist_path).await;
         let key = setup.api_key.trim();
         if !key.is_empty() {
-            match soloist::find_exe(&self.cfg.soloist_path) {
-                Some(exe) => {
-                    if let Err(e) = soloist::save_api_key(&exe, key).await {
+            match &exe {
+                Ok(exe) => {
+                    if let Err(e) = soloist::save_api_key(exe, key).await {
                         self.out.send(Event::Error(e));
                     }
                 }
-                None => self.out.send(Event::Error(
+                Err(_) => self.out.send(Event::Error(
                     "Soloist was not found, thus the API key was not saved.".into(),
                 )),
             }
@@ -384,9 +390,12 @@ impl Core {
         let id = self.cfg.client_id.clone();
         let tx = self.int_tx.clone();
         let http = self.http.clone();
-        tokio::spawn(async move {
+        if let Some(old) = self.login_task.take() {
+            old.abort();
+        }
+        self.login_task = Some(tokio::spawn(async move {
             let _ = tx.send(Internal::Login(Auth::interactive(http, &id).await));
-        });
+        }));
     }
 
     fn play(&mut self, context: Option<String>, tracks: Vec<Track>, index: usize) {
@@ -489,6 +498,13 @@ impl Core {
         }
         match cmd {
             Command::Login(setup) => self.login(setup).await,
+            Command::CancelLogin => {
+                // The abort closes the callback listener, thus port 8898 becomes free.
+                if let Some(task) = self.login_task.take() {
+                    task.abort();
+                    self.out.send(Event::Auth(AuthState::LoggedOut));
+                }
+            }
             Command::Logout => {
                 auth::forget();
                 if let Some(s) = self.soloist.take() {
@@ -618,8 +634,12 @@ impl Core {
 
     async fn internal(&mut self, msg: Internal) {
         match msg {
-            Internal::Login(Ok(auth)) => self.logged_in(auth).await,
+            Internal::Login(Ok(auth)) => {
+                self.login_task = None;
+                self.logged_in(auth).await;
+            }
             Internal::Login(Err(e)) => {
+                self.login_task = None;
                 self.out.send(Event::Error(format!("Login failed: {e}")));
                 self.out.send(Event::Auth(AuthState::LoggedOut));
             }

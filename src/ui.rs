@@ -15,7 +15,7 @@ use eframe::egui::{
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
-    auth::{Config, REDIRECT_URI},
+    auth::{Config, REDIRECT_URI, clean_client_id},
     model::{
         AuthState, Card, CardKind, Command, Event, PageData, PageKey, Playback, PlayerStatus,
         Repeat, Setup, Track,
@@ -29,6 +29,8 @@ const HOVER: Color32 = Color32::from_rgb(38, 40, 48);
 const TEXT: Color32 = Color32::from_rgb(232, 233, 238);
 const DIM: Color32 = Color32::from_rgb(150, 153, 165);
 const ACCENT: Color32 = Color32::from_rgb(255, 176, 66);
+const OK: Color32 = Color32::from_rgb(120, 200, 130);
+const BAD: Color32 = Color32::from_rgb(240, 120, 110);
 
 const ROW_H: f32 = 52.0;
 /// The maximum number of cover textures in memory.
@@ -77,6 +79,8 @@ pub struct App {
     setup_client_id: String,
     setup_path: String,
     setup_key: String,
+    /// The result of the last search for Soloist, and its time and input.
+    located: (soloist::Located, Instant, String),
 
     playlists: Vec<Card>,
     view: View,
@@ -212,6 +216,7 @@ impl App {
             setup_client_id: cfg.client_id,
             setup_path: cfg.soloist_path,
             setup_key: String::new(),
+            located: (soloist::Located::Missing, Instant::now() - Duration::from_secs(60), String::new()),
             playlists: Vec::new(),
             view: View::new(PageKey::Home),
             history: Vec::new(),
@@ -392,10 +397,31 @@ impl App {
                         AuthState::WaitingForBrowser => {
                             ui.spinner();
                             ui.label("Approve the login in your browser.");
+                            ui.add_space(8.0);
                             ui.label(
-                                RichText::new("If the browser shows an error, restart Spotimy and try again.")
-                                    .color(DIM),
+                                RichText::new(
+                                    "If the browser shows \"INVALID_CLIENT: Invalid redirect URI\", the \
+                                     redirect URI is not in your Spotify app. Add it in the dashboard, \
+                                     save, and try again:",
+                                )
+                                .color(DIM),
                             );
+                            ui.horizontal(|ui| {
+                                ui.monospace(REDIRECT_URI);
+                                if ui.small_button("Copy").clicked() {
+                                    ui.ctx().copy_text(REDIRECT_URI.to_owned());
+                                }
+                            });
+                            ui.label(
+                                RichText::new(
+                                    "If it shows \"INVALID_CLIENT: Invalid client\", the client ID is not correct.",
+                                )
+                                .color(DIM),
+                            );
+                            ui.add_space(8.0);
+                            if ui.button("Cancel").clicked() {
+                                self.send(Command::CancelLogin);
+                            }
                             return;
                         }
                         _ => {}
@@ -423,33 +449,77 @@ impl App {
                                 .hint_text("Client ID (32 characters)")
                                 .desired_width(f32::INFINITY),
                         );
+                        let client_id = clean_client_id(&self.setup_client_id);
+                        if client_id.is_some() {
+                            ui.label(RichText::new("✔ The client ID has the correct format.").color(OK).small());
+                        } else if !self.setup_client_id.trim().is_empty() {
+                            ui.label(
+                                RichText::new(
+                                    "A client ID has 32 characters: the digits 0 to 9 and the letters a to f. \
+                                     Do not use the client secret.",
+                                )
+                                .color(BAD)
+                                .small(),
+                            );
+                        }
                         ui.add_space(12.0);
 
                         ui.label(RichText::new("2. Spotify Soloist (the audio player)").strong());
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.0;
-                            ui.hyperlink_to("Download Soloist", soloist::DOWNLOAD_PAGE);
-                            ui.label(
-                                RichText::new(" from Spotify and extract it. Give the path of the file or its folder.")
-                                    .color(DIM),
+                        // Search again each second, to see a download when it completes.
+                        if self.located.1.elapsed() > Duration::from_secs(1)
+                            || self.located.2 != self.setup_path
+                        {
+                            self.located = (
+                                soloist::locate(&self.setup_path),
+                                Instant::now(),
+                                self.setup_path.clone(),
                             );
-                        });
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.setup_path)
-                                .hint_text("Path of soloist (empty: search in Downloads, PATH, and the app folder)")
-                                .desired_width(f32::INFINITY),
-                        );
-                        let found = soloist::find_exe(&self.setup_path);
-                        match &found {
-                            Some(p) => ui.label(
-                                RichText::new(format!("Found: {}", p.display())).color(DIM).small(),
-                            ),
-                            None => ui.label(
-                                RichText::new("Soloist is not found at this time.")
-                                    .color(Color32::from_rgb(240, 120, 110))
+                        }
+                        ui.ctx().request_repaint_after(Duration::from_secs(1));
+                        match self.located.0.clone() {
+                            soloist::Located::Exe(p) => {
+                                ui.label(
+                                    RichText::new(format!("✔ Soloist is ready: {}", p.display()))
+                                        .color(OK)
+                                        .small(),
+                                );
+                            }
+                            soloist::Located::Archive(p) => {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "✔ The download is found: {}. Spotimy extracts it at the login.",
+                                        p.display()
+                                    ))
+                                    .color(OK)
                                     .small(),
-                            ),
-                        };
+                                );
+                            }
+                            soloist::Located::Missing => {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    ui.hyperlink_to("Download Soloist", soloist::DOWNLOAD_PAGE);
+                                    ui.label(
+                                        RichText::new(
+                                            " from Spotify into your Downloads folder. Spotimy finds it \
+                                             there and extracts it. No other step is necessary.",
+                                        )
+                                        .color(DIM),
+                                    );
+                                });
+                                ui.label(
+                                    RichText::new("Spotimy waits for the download…").color(BAD).small(),
+                                );
+                            }
+                        }
+                        egui::CollapsingHeader::new(RichText::new("Soloist is in a different folder").small())
+                            .id_salt("soloist_path")
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.setup_path)
+                                        .hint_text("Path of the soloist file or its folder")
+                                        .desired_width(f32::INFINITY),
+                                );
+                            });
                         ui.add_space(12.0);
 
                         ui.label(RichText::new("3. Soloist API key").strong());
@@ -472,7 +542,7 @@ impl App {
                         );
                         ui.add_space(16.0);
 
-                        let ready = self.setup_client_id.trim().len() >= 16;
+                        let ready = client_id.is_some();
                         let button = egui::Button::new(
                             RichText::new("Log in with Spotify").color(Color32::BLACK).strong(),
                         )
@@ -481,7 +551,7 @@ impl App {
                         if ui.add_enabled(ready, button).clicked() {
                             let api_key = std::mem::take(&mut self.setup_key);
                             self.send(Command::Login(Setup {
-                                client_id: self.setup_client_id.clone(),
+                                client_id: client_id.clone().unwrap_or_default(),
                                 soloist_path: self.setup_path.clone(),
                                 api_key,
                             }));

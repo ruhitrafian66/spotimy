@@ -8,7 +8,7 @@ the project is low memory use: one Rust process with an egui/OpenGL window, no w
 Rust is not on PATH by default on the owner's Mac. Run `source ~/.cargo/env` first.
 
 ```sh
-cargo test --release             # unit tests (13)
+cargo test --release             # unit tests (16)
 cargo build --release            # macOS binary: target/release/spotimy
 scripts/bundle-macos.sh          # dist/Spotimy.app (ad-hoc signed)
 scripts/build-windows.sh         # dist/Spotimy.exe, cross-compiled; needs mingw-w64
@@ -47,8 +47,9 @@ Playback has two paths, on purpose:
 - **Audio comes only from Spotify Soloist**, Spotify's official headless player. Do not add
   librespot or any other reverse-engineered playback, and do not use Spotify's own client IDs.
   Spotify blocked those routes on purpose in 2026; working around the block is out of scope.
-- **Do not bundle or redistribute Soloist.** Spotify's terms forbid it. The user downloads it; the
-  app only finds and starts it. Do not store the Soloist API key: pass it once to
+- **Do not bundle or redistribute Soloist.** Spotify's terms forbid it, and ask that users be sent
+  to the download page. The user downloads it; the app only finds it (also as an archive in
+  Downloads, which it extracts) and starts it. Do not make the app fetch Soloist by itself. Do not store the Soloist API key: pass it once to
   `soloist setup-api-key` over stdin.
 - **The Web API follows the February 2026 Development Mode rules.** Use `/playlists/{id}/items`
   (field `item`, with `track` as the old fallback), `/me/library` for save/remove/contains, and a

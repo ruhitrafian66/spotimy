@@ -120,6 +120,13 @@ pub fn forget() {
     let _ = fs::remove_file(token_path());
 }
 
+/// Checks a client ID that the user typed or pasted. A Spotify client ID is 32 hex characters.
+/// Returns the clean ID.
+pub fn clean_client_id(input: &str) -> Option<String> {
+    let id = input.trim().trim_matches(|c| c == '"' || c == '\'');
+    (id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())).then(|| id.to_ascii_lowercase())
+}
+
 // ---------------------------------------------------------------- PKCE
 
 fn random_token(bytes: usize) -> Result<String, String> {
@@ -368,6 +375,16 @@ impl Auth {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_id_must_be_32_hex_characters() {
+        let id = "0123456789abcdef0123456789ABCDEF";
+        assert_eq!(clean_client_id(&format!("  {id}\n")), Some(id.to_ascii_lowercase()));
+        assert_eq!(clean_client_id(&format!("\"{id}\"")), Some(id.to_ascii_lowercase()));
+        assert_eq!(clean_client_id("0123456789abcdef"), None);
+        assert_eq!(clean_client_id("0123456789abcdef0123456789abcdeg"), None);
+        assert_eq!(clean_client_id(""), None);
+    }
 
     #[test]
     fn code_challenge_matches_the_rfc_7636_example() {

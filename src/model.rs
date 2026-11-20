@@ -146,6 +146,8 @@ pub struct Setup {
 
 pub enum Command {
     Login(Setup),
+    /// Stops a login that waits for the browser.
+    CancelLogin,
     Logout,
     RestartPlayer,
     Load { key: PageKey, offset: u32 },

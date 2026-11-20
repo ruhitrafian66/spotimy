@@ -52,6 +52,32 @@ fn data_dir() -> Option<PathBuf> {
     }
 }
 
+/// The folder into which Spotimy extracts a downloaded Soloist archive.
+fn install_dir() -> PathBuf {
+    crate::auth::data_dir().join("soloist")
+}
+
+/// Entries in the Downloads folder whose names start with "soloist".
+fn soloist_downloads() -> Vec<PathBuf> {
+    let Some(dir) = dirs::download_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .take(5000)
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("soloist")
+        })
+        .map(|e| e.path())
+        .collect()
+}
+
 /// Finds the Soloist executable. `configured` is the path from the settings.
 pub fn find_exe(configured: &str) -> Option<PathBuf> {
     let configured = configured.trim().trim_matches('"');
@@ -67,15 +93,17 @@ pub fn find_exe(configured: &str) -> Option<PathBuf> {
             dirs_to_try.push(d.to_owned());
         }
     }
+    dirs_to_try.push(install_dir());
     dirs_to_try.push(crate::auth::data_dir());
     if let Some(h) = dirs::home_dir() {
         dirs_to_try.push(h.join("soloist"));
         dirs_to_try.push(h.join(".local").join("bin"));
     }
     if let Some(d) = dirs::download_dir() {
-        dirs_to_try.push(d.clone());
-        dirs_to_try.push(d.join("soloist"));
+        dirs_to_try.push(d);
     }
+    // A browser that extracts the archive makes a folder such as "soloist_release_osx_arm64".
+    dirs_to_try.extend(soloist_downloads().into_iter().filter(|p| p.is_dir()));
     if let Some(path) = std::env::var_os("PATH") {
         dirs_to_try.extend(std::env::split_paths(&path));
     }
@@ -83,6 +111,74 @@ pub fn find_exe(configured: &str) -> Option<PathBuf> {
         .into_iter()
         .map(|d| d.join(EXE))
         .find(|p| p.is_file())
+}
+
+fn is_archive(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    path.is_file()
+        && name.starts_with("soloist")
+        && [".tar.gz", ".tgz", ".tar", ".zip"].iter().any(|ext| name.ends_with(ext))
+}
+
+/// Where Soloist is at this time.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Located {
+    /// The executable is ready to use.
+    Exe(PathBuf),
+    /// A downloaded archive is in the Downloads folder. Spotimy can extract it.
+    Archive(PathBuf),
+    Missing,
+}
+
+pub fn locate(configured: &str) -> Located {
+    if let Some(exe) = find_exe(configured) {
+        return Located::Exe(exe);
+    }
+    if !configured.trim().is_empty() {
+        return Located::Missing; // The user gave a path, and it is not correct.
+    }
+    // The newest archive, if there are two or more.
+    soloist_downloads()
+        .into_iter()
+        .filter(|p| is_archive(p))
+        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
+        .map_or(Located::Missing, Located::Archive)
+}
+
+/// Extracts a Soloist archive that the user downloaded. Returns the executable.
+/// `tar` is part of macOS and of Windows 10 and later, and it reads `.zip` files also.
+async fn install_archive(archive: &Path) -> Result<PathBuf, String> {
+    let dest = install_dir();
+    tokio::fs::create_dir_all(&dest).await.map_err(|e| e.to_string())?;
+    let status = command(Path::new("tar"))
+        .arg("-xf")
+        .arg(archive)
+        .arg("-C")
+        .arg(&dest)
+        .status()
+        .await
+        .map_err(|e| format!("The archive was not extracted: {e}"))?;
+    let exe = dest.join(EXE);
+    if status.success() && exe.is_file() {
+        Ok(exe)
+    } else {
+        Err(format!(
+            "The Soloist archive {} is not complete. Download it again.",
+            archive.display()
+        ))
+    }
+}
+
+/// Finds Soloist, and extracts a downloaded archive if that is necessary.
+pub async fn ensure_exe(configured: &str) -> Result<PathBuf, String> {
+    match locate(configured) {
+        Located::Exe(exe) => Ok(exe),
+        Located::Archive(archive) => install_archive(&archive).await,
+        Located::Missing => Err("Soloist was not found. Download it from Spotify.".into()),
+    }
 }
 
 fn command(exe: &Path) -> Command {
@@ -361,6 +457,30 @@ mod tests {
         assert_eq!(t.duration_ms, 201000);
         assert_eq!(t.img_s, "https://img/small");
         assert_eq!(t.img_l, "https://img/default");
+    }
+
+    #[test]
+    fn recognizes_soloist_archives() {
+        let dir = std::env::temp_dir().join(format!("spotimy-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, expected) in [
+            ("soloist_release_osx_arm64.tar.gz", true),
+            ("Soloist_release_windows_x86_64.zip", true),
+            ("soloist_release_osx_arm64 (1).tar.gz", true),
+            ("soloist.txt", false),
+            ("other.zip", false),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, b"x").unwrap();
+            assert_eq!(is_archive(&path), expected, "{name}");
+        }
+        assert!(!is_archive(&dir.join("soloist_missing.zip")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_wrong_configured_path_is_missing() {
+        assert_eq!(locate("/no/such/folder/soloist"), Located::Missing);
     }
 
     #[test]
