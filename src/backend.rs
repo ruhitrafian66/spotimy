@@ -137,7 +137,13 @@ impl Core {
     async fn startup(&mut self) {
         if demo::enabled() {
             self.out.send(Event::Auth(AuthState::LoggedIn { name: "Demo user".into() }));
-            self.out.send(Event::Player(PlayerStatus::Ready));
+            // `SPOTIMY_DEMO=pair` shows the pairing instructions.
+            let pairing = std::env::var("SPOTIMY_DEMO").as_deref() == Ok("pair");
+            self.out.send(Event::Player(if pairing {
+                PlayerStatus::NeedsPairing
+            } else {
+                PlayerStatus::Ready
+            }));
             self.pb.track = Some(demo::track(6));
             self.pb.liked = Some(true);
             self.set_position(42_000);

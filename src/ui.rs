@@ -1080,6 +1080,65 @@ impl App {
 }
 
 impl App {
+    /// Shows what the user must do when the player is not ready.
+    fn player_banner(&mut self, ui: &mut Ui) {
+        let status = self.player.clone();
+        if !matches!(status, PlayerStatus::NeedsPairing | PlayerStatus::Failed(_)) {
+            return;
+        }
+        egui::Frame::new()
+            .fill(Color32::from_rgb(46, 38, 22))
+            .stroke(Stroke::new(1.0, ACCENT.linear_multiply(0.5)))
+            .corner_radius(8.0)
+            .inner_margin(12.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                match status {
+                    PlayerStatus::NeedsPairing => {
+                        ui.label(
+                            RichText::new("One more step: pair the player with your Spotify account")
+                                .strong()
+                                .color(ACCENT),
+                        );
+                        ui.label(RichText::new("You do this one time. Keep Spotimy open.").color(DIM));
+                        ui.add_space(4.0);
+                        for step in [
+                            "1. Connect your phone to the same Wi-Fi network as this computer.".to_owned(),
+                            "2. Open the Spotify app on the phone and start a song.".to_owned(),
+                            "3. Tap the device icon at the bottom of the Now Playing screen.".to_owned(),
+                            format!("4. Select \"{}\" in the device list.", soloist::DEVICE_NAME),
+                        ] {
+                            ui.label(step);
+                        }
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "This message goes away when the pairing is complete. If \"{}\" is not \
+                                 in the list: wait 10 seconds, set VPN to off, and permit local network \
+                                 access if the system asks. The Spotify app on this computer also works.",
+                                soloist::DEVICE_NAME
+                            ))
+                            .color(DIM)
+                            .small(),
+                        );
+                    }
+                    PlayerStatus::Failed(why) => {
+                        ui.label(
+                            RichText::new("The audio player has a problem")
+                                .strong()
+                                .color(Color32::from_rgb(240, 120, 110)),
+                        );
+                        ui.label(why);
+                        if ui.button("Try again").clicked() {
+                            self.send(Command::RestartPlayer);
+                        }
+                    }
+                    _ => {}
+                }
+            });
+        ui.add_space(8.0);
+    }
+
     /// Test hooks. `SPOTIMY_PAGE` opens a page at startup.
     /// `SPOTIMY_SHOT` saves a screenshot to the given path and stops the app.
     fn test_hooks(&mut self, ctx: &egui::Context) {
@@ -1147,7 +1206,10 @@ impl eframe::App for App {
                 .show(ui, |ui| self.sidebar(ui));
             egui::CentralPanel::default()
                 .frame(egui::Frame::new().fill(BG).inner_margin(12.0))
-                .show(ui, |ui| self.page(ui));
+                .show(ui, |ui| {
+                    self.player_banner(ui);
+                    self.page(ui);
+                });
         }
 
         // ---- toast message

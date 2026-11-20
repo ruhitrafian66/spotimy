@@ -36,8 +36,27 @@ Spotify closed those routes for third-party client IDs in 2026; Soloist is the s
    the setup screen (Spotimy passes it to `soloist setup-api-key` over stdin and does not store it),
    or run `soloist setup-api-key` yourself.
 4. Start Spotimy, fill in the setup screen, and approve the login in the browser.
-5. **Pair the player.** The first time, open the Spotify app on a phone or computer on the same
-   network, open the device list, and pick **Spotimy**. Soloist remembers the session after that.
+5. **Pair the player** (see below). Spotimy shows the instructions until this is done.
+
+### Pairing the player
+
+After the browser login, Spotimy shows "pair the player". Soloist is running, but it does not
+know which Spotify account to play for yet. You link them once from an official Spotify app:
+
+1. Keep Spotimy open.
+2. Connect your phone to the same Wi-Fi network as the computer.
+3. Open the Spotify app on the phone and start any song.
+4. Tap the device icon at the bottom of the Now Playing screen (a speaker in front of a screen).
+5. Pick **Spotimy** in the device list.
+
+The song moves to the computer, the message in Spotimy disappears, and a volume slider appears
+at the bottom right. Soloist remembers the session, so later starts need no pairing.
+
+If **Spotimy** is not in the list: wait ten seconds and reopen the list; make sure the phone is on
+Wi-Fi and not mobile data; turn off any VPN on either device; allow "local network" access if
+macOS or Windows Firewall asks about `soloist`; avoid guest networks, which often block devices
+from seeing each other. The official Spotify app on the same computer also works for pairing;
+close it afterwards.
 
 Soloist builds expire 90 days after their build date. When that happens Spotimy says so; download
 a new build.
@@ -66,7 +85,8 @@ cargo build --release
 Demo mode shows sample data without an account, for UI work and memory measurements:
 
 ```sh
-SPOTIMY_DEMO=1 cargo run --release
+SPOTIMY_DEMO=1 cargo run --release      # normal screens
+SPOTIMY_DEMO=pair cargo run --release   # with the pairing instructions
 ```
 
 ## Memory
